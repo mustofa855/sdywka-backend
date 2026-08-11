@@ -263,11 +263,44 @@ def logout_view(request):
         return Response({"message": f"Gagal melangsungkan logout: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['GET'])
+@api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def me_view(request):
-    serializer = UserMeSerializer(request.user, context={'request': request})
-    return Response(serializer.data, status=status.HTTP_200_OK)
+    user = request.user
+
+    # 1. Mengambil data profil pengguna (GET)
+    if request.method == 'GET':
+        serializer = UserMeSerializer(user, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    # 2. Memperbarui data profil pengguna (PATCH)
+    elif request.method == 'PATCH':
+        data = request.data
+        
+        # Update Username
+        if 'username' in data and data['username']:
+            user.username = str(data['username']).strip()
+            
+        # Update Password
+        if 'password' in data and data['password']:
+            user.set_password(data['password'])
+            
+        user.save()
+
+        # Update Profil Tambahan (Quotes & Foto Profil)
+        profil, _ = UserProfile.objects.get_or_create(user=user)
+        
+        if 'quotes' in data:
+            profil.quotes = data['quotes']
+            
+        if 'foto' in request.FILES:
+            profil.foto_profil = request.FILES['foto']
+            
+        profil.save()
+
+        serializer = UserMeSerializer(user, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 # ==========================================
