@@ -649,22 +649,31 @@ def admin_pengumuman_list_create(request):
 
 
 @api_view(['GET', 'PUT', 'DELETE'])
-@permission_classes([IsAuthenticated, IsAdminUser])
-@parser_classes([MultiPartParser, FormParser, JSONParser])
+@permission_classes([IsAuthenticated])
 def admin_pengumuman_detail(request, pk):
-    pengumuman = get_object_or_404(Pengumuman, pk=pk)
+    try:
+        pengumuman = Pengumuman.objects.get(pk=pk)
+    except Pengumuman.DoesNotExist:
+        return Response({'detail': 'Pengumuman tidak ditemukan.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # 1. Handling Method GET (Melihat detail pengumuman)
     if request.method == 'GET':
         serializer = PengumumanSerializer(pengumuman, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    # 2. Handling Method PUT (Memperbarui pengumuman)
     elif request.method == 'PUT':
         serializer = PengumumanSerializer(pengumuman, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # 3. Handling Method DELETE (Menghapus pengumuman)
     elif request.method == 'DELETE':
         pengumuman.delete()
-        return Response({'message': 'Pengumuman berhasil dihapus.'}, status=status.HTTP_200_OK)
+        return Response({'detail': 'Pengumuman berhasil dihapus.'}, status=status.HTTP_204_NO_CONTENT)
+
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated, IsAdminUser])
