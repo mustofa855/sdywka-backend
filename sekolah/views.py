@@ -281,8 +281,8 @@ def me_view(request):
         # A. Update Username
         if 'username' in data and data['username']:
             new_username = str(data['username']).strip()
-            # Cek jika username sudah digunakan akun lain
-            if User.objects.filter(username=new_username).exclude(pk=user.pk).exists():
+            # Cek apakah username sudah digunakan pengguna lain
+            if User.objects.filter(username__iexact=new_username).exclude(pk=user.pk).exists():
                 return Response({'message': 'Username sudah digunakan oleh pengguna lain.'}, status=status.HTTP_400_BAD_REQUEST)
             user.username = new_username
             
@@ -296,10 +296,12 @@ def me_view(request):
         profil, _ = UserProfile.objects.get_or_create(user=user)
         
         if 'quotes' in data:
-            profil.motto = data['quotes']  # FIX: Menggunakan 'motto' sesuai field model UserProfile
+            profil.motto = data['quotes']
             
-        if 'foto' in request.FILES:
-            profil.foto_profil = request.FILES['foto']
+        # Ambil file foto dari request.FILES atau request.data
+        foto_file = request.FILES.get('foto') or data.get('foto')
+        if foto_file and hasattr(foto_file, 'size'):
+            profil.foto_profil = foto_file
             
         profil.save()
 
@@ -308,12 +310,13 @@ def me_view(request):
             guru = user.guru_profile
             if 'quotes' in data:
                 guru.motto = data['quotes']
-            if 'foto' in request.FILES:
-                guru.foto = request.FILES['foto']
+            if foto_file and hasattr(foto_file, 'size'):
+                guru.foto = foto_file
             guru.save()
 
         serializer = UserMeSerializer(user, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 
 
@@ -1090,10 +1093,19 @@ def user_post_comment_list_create(request, pk):
 @permission_classes([IsAuthenticated])
 def user_post_delete(request, pk):
     post = get_object_or_404(Post, pk=pk)
+    
+    # Validasi hak akses: hanya pemilik postingan atau admin yang boleh menghapus
     if post.user != request.user and not (request.user.is_staff or request.user.is_superuser):
-        return Response({"message": "Anda tidak memiliki izin untuk menghapus postingan ini."}, status=status.HTTP_403_FORBIDDEN)
+        return Response(
+            {"message": "Anda tidak memiliki izin untuk menghapus postingan ini."}, 
+            status=status.HTTP_403_FORBIDDEN
+        )
+        
     post.delete()
-    return Response({"message": "Postingan berhasil dihapus."}, status=status.HTTP_204_NO_CONTENT)
+    return Response(
+        {"message": "Postingan berhasil dihapus."}, 
+        status=status.HTTP_204_NO_CONTENT
+    )
 
 
 # ==========================================
