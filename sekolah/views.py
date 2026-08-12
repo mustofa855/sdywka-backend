@@ -263,60 +263,24 @@ def logout_view(request):
         return Response({"message": f"Gagal melangsungkan logout: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['GET', 'PATCH'])
+@api_view(['GET', 'PATCH', 'PUT'])
 @permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def me_view(request):
+    """Mendapatkan profil pengguna login saat ini dan memperbarui datanya."""
     user = request.user
 
-    # 1. AMBIL DATA PROFIL PENGGUNA (GET)
     if request.method == 'GET':
         serializer = UserMeSerializer(user, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    # 2. PERBARUI DATA PROFIL PENGGUNA (PATCH)
-    elif request.method == 'PATCH':
-        data = request.data
-        
-        # A. Update Username
-        if 'username' in data and data['username']:
-            new_username = str(data['username']).strip()
-            # Cek apakah username sudah digunakan pengguna lain
-            if User.objects.filter(username__iexact=new_username).exclude(pk=user.pk).exists():
-                return Response({'message': 'Username sudah digunakan oleh pengguna lain.'}, status=status.HTTP_400_BAD_REQUEST)
-            user.username = new_username
-            
-        # B. Update Password
-        if 'password' in data and data['password']:
-            user.set_password(data['password'])
-            
-        user.save()
-
-        # C. Update Profil Tambahan (Motto & Foto Profil)
-        profil, _ = UserProfile.objects.get_or_create(user=user)
-        
-        if 'quotes' in data:
-            profil.motto = data['quotes']
-            
-        # Ambil file foto dari request.FILES atau request.data
-        foto_file = request.FILES.get('foto') or data.get('foto')
-        if foto_file and hasattr(foto_file, 'size'):
-            profil.foto_profil = foto_file
-            
-        profil.save()
-
-        # D. Sinkronisasi Otomatis ke Profil Guru (Jika Terhubung)
-        if hasattr(user, 'guru_profile') and user.guru_profile:
-            guru = user.guru_profile
-            if 'quotes' in data:
-                guru.motto = data['quotes']
-            if foto_file and hasattr(foto_file, 'size'):
-                guru.foto = foto_file
-            guru.save()
-
-        serializer = UserMeSerializer(user, context={'request': request})
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
+    elif request.method in ['PATCH', 'PUT']:
+        serializer = UserSerializer(user, data=request.data, partial=True, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            me_serializer = UserMeSerializer(user, context={'request': request})
+            return Response(me_serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 
@@ -355,116 +319,77 @@ def admin_dashboard_stats(request):
 # FITUR PRESENSI (SCAN & RIWAYAT + 1 TAHUN RETENSI)
 # ==========================================
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdminUser])
+@permission_classes([IsAuthenticated])
 def admin_scan_presensi(request):
-    raw_value = str(request.data.get('uuid', '')).strip()
-    if not raw_value:
-        return Response({'message': 'Kode QR / UUID tidak valid atau kosong.'}, status=status.HTTP_400_BAD_REQUEST)
+    """Memproses hasil scan QR Code untuk presensi Masuk / Pulang."""
+    uuid_code = request.data.get('uuid') or request.data.get('qr_uuid') or request.data.get('code')
+    if not uuid_code:
+        return Response({'message': 'Kode QR / UUID wajib dikirim.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if raw_value.startswith('USER-UUID-'):
-        uuid_code = raw_value.replace('USER-UUID-', '').strip()
+    uuid_code = str(uuid_code).strip()
+    profile = UserProfile.objects.filter(uuid_code=uuid_code).first()
+
+    if not profile:
+        return Response({'message': 'Kode QR tidak valid atau pengguna tidak ditemukan!'}, status=status.HTTP_404_NOT_FOUND)
+
+    target_user = profile.user
+    today = timezone.now().date()
+    now = timezone.now()
+
+    # Cari riwayat presensi pengguna hari ini
+    presensi_hari_ini = Presensi.objects.filter(
+        user=target_user,
+        waktu_scan__date=today
+    ).order_by('-waktu_scan').first()
+
+    nama_pengguna = target_user.get_full_name() or target_user.username
+    if hasattr(target_user, 'guru_profile') and target_user.guru_profile and target_user.guru_profile.nama:
+        nama_pengguna = target_user.guru_profile.nama
+
+    if presensi_hari_ini:
+        if not presensi_hari_ini.waktu_pulang:
+            # Presensi Pulang
+            presensi_hari_ini.waktu_pulang = now
+            presensi_hari_ini.save()
+
+            waktu_pulang_str = timezone.localtime(now).strftime('%H:%M:%S')
+            return Response({
+                'type': 'pulang',
+                'nama_pengguna': nama_pengguna,
+                'waktu_pulang': waktu_pulang_str,
+                'message': f'Presensi PULANG berhasil dicatat untuk {nama_pengguna}'
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'message': f'{nama_pengguna} sudah melakukan presensi masuk dan pulang hari ini.'
+            }, status=status.HTTP_400_BAD_REQUEST)
     else:
-        uuid_code = raw_value
+        # Presensi Masuk
+        jam_masuk_batas = time(7, 15, 0)
+        status_kehadiran = 'Hadir Tepat Waktu'
+        if timezone.localtime(now).time() > jam_masuk_batas:
+            status_kehadiran = 'Terlambat'
 
-    target_user = None
-
-    profil_user = UserProfile.objects.filter(uuid_code=uuid_code).first()
-    if profil_user:
-        target_user = profil_user.user
-
-    if not target_user:
-        target_user = User.objects.filter(username__iexact=raw_value).first()
-
-    if not target_user:
-        guru_obj = Guru.objects.filter(nip=raw_value).first()
-        if guru_obj and guru_obj.user:
-            target_user = guru_obj.user
-
-    if not target_user and raw_value.isdigit():
-        try:
-            target_user = User.objects.filter(id=int(raw_value)).first()
-        except (ValueError, TypeError, OverflowError):
-            pass
-
-    if not target_user:
-        return Response(
-            {'message': f'Pengguna dengan kredensial "{raw_value}" tidak ditemukan di sistem!'},
-            status=status.HTTP_404_NOT_FOUND
-        )
-
-    satu_tahun_lalu = timezone.now() - timedelta(days=365)
-    Presensi.objects.filter(waktu_scan__lt=satu_tahun_lalu).delete()
-
-    guru_profile = safe_get_guru(target_user)
-    nama_lengkap = None
-    if guru_profile and guru_profile.nama:
-        nama_lengkap = guru_profile.nama
-    if not nama_lengkap:
-        nama_lengkap = target_user.get_full_name() or target_user.username
-
-    now = timezone.localtime(timezone.now())
-    hari_ini = now.date()
-
-    presensi_hari_ini = Presensi.objects.filter(user=target_user, waktu_scan__date=hari_ini).first()
-
-    peran_str = 'Siswa'
-    if target_user.is_staff or target_user.is_superuser:
-        peran_str = 'Guru/Admin'
-    elif guru_profile:
-        peran_str = 'Guru'
-
-    if not presensi_hari_ini:
-        current_time = now.time()
-        batas_toleransi = time(7, 1, 59)
-        status_kehadiran = 'Hadir Tepat Waktu' if current_time <= batas_toleransi else 'Terlambat'
+        peran = 'Guru'
+        if hasattr(target_user, 'guru_profile') and target_user.guru_profile:
+            kat = (target_user.guru_profile.kategori or '').lower()
+            peran = 'Staf / TU' if ('staf' in kat or 'tu' in kat) else 'Guru'
 
         presensi_baru = Presensi.objects.create(
             user=target_user,
+            waktu_scan=now,
             status=status_kehadiran,
-            peran=peran_str
+            peran=peran
         )
 
         serializer = PresensiSerializer(presensi_baru, context={'request': request})
-        waktu_str = now.strftime('%H:%M:%S')
-
         return Response({
             'type': 'masuk',
-            'message': f'BERHASIL MASUK: {nama_lengkap} ({status_kehadiran}) jam {waktu_str}',
-            'nama_pengguna': nama_lengkap,
+            'nama_pengguna': nama_pengguna,
             'status_kehadiran': status_kehadiran,
-            'waktu_scan': waktu_str,
-            'data': serializer.data
-        }, status=status.HTTP_201_CREATED)
-
-    else:
-        if presensi_hari_ini.waktu_pulang:
-            return Response({
-                'message': f'{nama_lengkap} sudah melakukan presensi MASUK dan PULANG hari ini!'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        waktu_masuk_local = timezone.localtime(presensi_hari_ini.waktu_scan)
-        selisih_detik = (now - waktu_masuk_local).total_seconds()
-
-        if selisih_detik < 1800:
-            menit_sisa = int((1800 - selisih_detik) // 60) + 1
-            return Response({
-                'message': f'Gagal Scan Pulang! Minimal 30 menit setelah scan masuk baru bisa absen pulang. Silakan tunggu sekitar {menit_sisa} menit lagi.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        presensi_hari_ini.waktu_pulang = now
-        presensi_hari_ini.save()
-
-        serializer = PresensiSerializer(presensi_hari_ini, context={'request': request})
-        waktu_str = now.strftime('%H:%M:%S')
-
-        return Response({
-            'type': 'pulang',
-            'message': f'BERHASIL PULANG: {nama_lengkap} absen pulang jam {waktu_str}',
-            'nama_pengguna': nama_lengkap,
-            'status_kehadiran': presensi_hari_ini.status,
-            'waktu_scan': presensi_hari_ini.waktu_scan.strftime('%H:%M:%S'),
-            'waktu_pulang': waktu_str,
-            'data': serializer.data
+            'waktu_scan': timezone.localtime(now).strftime('%H:%M:%S'),
+            'data': serializer.data,
+            'message': f'Presensi MASUK berhasil dicatat untuk {nama_pengguna}'
         }, status=status.HTTP_200_OK)
 
 
@@ -876,27 +801,39 @@ def admin_video_detail(request, pk):
         return Response({"message": "Video galeri berhasil dihapus."}, status=status.HTTP_204_NO_CONTENT)
 
 
-@api_view(['GET', 'PUT'])
+@api_view(['GET', 'POST', 'PUT', 'PATCH'])
 @permission_classes([IsAuthenticated, IsAdminUser])
 def admin_profil_detail_update(request):
-    profil, _ = ProfilSekolah.objects.get_or_create(id=1)
+    """Mengelola pembacaan dan pembaruan Profil Sekolah (tanpa butuh ID di URL)."""
+    profil = ProfilSekolah.objects.first()
 
     if request.method == 'GET':
+        if not profil:
+            profil = ProfilSekolah.objects.create(
+                nama_sekolah="SD YWKA REL HOMY SCHOOL BANDUNG",
+                sejarah="Sejarah sekolah belum diisi.",
+                visi="Visi sekolah belum diisi.",
+                misi="Misi sekolah belum diisi."
+            )
         serializer = ProfilSekolahSerializer(profil, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    elif request.method == 'PUT':
-        serializer = ProfilSekolahSerializer(profil, data=request.data, partial=True, context={'request': request})
+    elif request.method in ['POST', 'PUT', 'PATCH']:
+        if not profil:
+            serializer = ProfilSekolahSerializer(data=request.data, context={'request': request})
+        else:
+            serializer = ProfilSekolahSerializer(profil, data=request.data, partial=True, context={'request': request})
+
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated, IsAdminUser])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def admin_hero_banner_list_create(request):
+    """Mendapatkan daftar semua banner atau membuat banner baru."""
     if request.method == 'GET':
         banners = HeroBanner.objects.all()
         serializer = HeroBannerSerializer(banners, many=True, context={'request': request})
@@ -909,18 +846,18 @@ def admin_hero_banner_list_create(request):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
-@api_view(['GET', 'PUT', 'DELETE'])
+@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated, IsAdminUser])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def admin_hero_banner_detail(request, pk):
+    """Mengedit, melihat detail, atau menghapus banner berdasarkan ID."""
     banner = get_object_or_404(HeroBanner, pk=pk)
 
     if request.method == 'GET':
         serializer = HeroBannerSerializer(banner, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    elif request.method == 'PUT':
+    elif request.method in ['PUT', 'PATCH']:
         serializer = HeroBannerSerializer(banner, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
@@ -929,7 +866,8 @@ def admin_hero_banner_detail(request, pk):
 
     elif request.method == 'DELETE':
         banner.delete()
-        return Response({"message": "Banner hero berhasil dihapus."}, status=status.HTTP_204_NO_CONTENT)
+        return Response({'message': 'Hero banner berhasil dihapus.'}, status=status.HTTP_204_NO_CONTENT)
+
 
 
 @api_view(['GET', 'POST'])
