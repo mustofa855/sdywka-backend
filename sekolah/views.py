@@ -636,10 +636,9 @@ def admin_berita_detail(request, pk):
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def admin_pengumuman_list_create(request):
     if request.method == 'GET':
-        pengumuman = Pengumuman.objects.all()
+        pengumuman = Pengumuman.objects.all().order_by('-is_pinned', '-tanggal', '-tanggal_dibuat')
         serializer = PengumumanSerializer(pengumuman, many=True, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
-
     elif request.method == 'POST':
         serializer = PengumumanSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
@@ -648,27 +647,24 @@ def admin_pengumuman_list_create(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+
 @api_view(['GET', 'PUT', 'DELETE'])
 @permission_classes([IsAuthenticated, IsAdminUser])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def admin_pengumuman_detail(request, pk):
     pengumuman = get_object_or_404(Pengumuman, pk=pk)
-
     if request.method == 'GET':
         serializer = PengumumanSerializer(pengumuman, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
-
     elif request.method == 'PUT':
         serializer = PengumumanSerializer(pengumuman, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
     elif request.method == 'DELETE':
         pengumuman.delete()
-        return Response({"message": "Pengumuman berhasil dihapus."}, status=status.HTTP_204_NO_CONTENT)
-
+        return Response({'message': 'Pengumuman berhasil dihapus.'}, status=status.HTTP_200_OK)
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated, IsAdminUser])
