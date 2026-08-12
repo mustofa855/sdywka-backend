@@ -263,24 +263,60 @@ def logout_view(request):
         return Response({"message": f"Gagal melangsungkan logout: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['GET', 'PATCH', 'PUT'])
+@api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def me_view(request):
-    """Mendapatkan profil pengguna login saat ini dan memperbarui datanya."""
     user = request.user
 
+    # 1. AMBIL DATA PROFIL PENGGUNA (GET)
     if request.method == 'GET':
         serializer = UserMeSerializer(user, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    elif request.method in ['PATCH', 'PUT']:
-        serializer = UserSerializer(user, data=request.data, partial=True, context={'request': request})
-        if serializer.is_valid():
-            serializer.save()
-            me_serializer = UserMeSerializer(user, context={'request': request})
-            return Response(me_serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    # 2. PERBARUI DATA PROFIL PENGGUNA (PATCH)
+    elif request.method == 'PATCH':
+        data = request.data
+        
+        # A. Update Username
+        if 'username' in data and data['username']:
+            new_username = str(data['username']).strip()
+            # Cek apakah username sudah digunakan pengguna lain
+            if User.objects.filter(username__iexact=new_username).exclude(pk=user.pk).exists():
+                return Response({'message': 'Username sudah digunakan oleh pengguna lain.'}, status=status.HTTP_400_BAD_REQUEST)
+            user.username = new_username
+            
+        # B. Update Password
+        if 'password' in data and data['password']:
+            user.set_password(data['password'])
+            
+        user.save()
+
+        # C. Update Profil Tambahan (Motto & Foto Profil)
+        profil, _ = UserProfile.objects.get_or_create(user=user)
+        
+        if 'quotes' in data:
+            profil.motto = data['quotes']
+            
+        # Ambil file foto dari request.FILES atau request.data
+        foto_file = request.FILES.get('foto') or data.get('foto')
+        if foto_file and hasattr(foto_file, 'size'):
+            profil.foto_profil = foto_file
+            
+        profil.save()
+
+        # D. Sinkronisasi Otomatis ke Profil Guru (Jika Terhubung)
+        if hasattr(user, 'guru_profile') and user.guru_profile:
+            guru = user.guru_profile
+            if 'quotes' in data:
+                guru.motto = data['quotes']
+            if foto_file and hasattr(foto_file, 'size'):
+                guru.foto = foto_file
+            guru.save()
+
+        serializer = UserMeSerializer(user, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 
 
