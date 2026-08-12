@@ -269,38 +269,52 @@ def logout_view(request):
 def me_view(request):
     user = request.user
 
-    # 1. Mengambil data profil pengguna (GET)
+    # 1. AMBIL DATA PROFIL PENGGUNA (GET)
     if request.method == 'GET':
         serializer = UserMeSerializer(user, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    # 2. Memperbarui data profil pengguna (PATCH)
+    # 2. PERBARUI DATA PROFIL PENGGUNA (PATCH)
     elif request.method == 'PATCH':
         data = request.data
         
-        # Update Username
+        # A. Update Username
         if 'username' in data and data['username']:
-            user.username = str(data['username']).strip()
+            new_username = str(data['username']).strip()
+            # Cek jika username sudah digunakan akun lain
+            if User.objects.filter(username=new_username).exclude(pk=user.pk).exists():
+                return Response({'message': 'Username sudah digunakan oleh pengguna lain.'}, status=status.HTTP_400_BAD_REQUEST)
+            user.username = new_username
             
-        # Update Password
+        # B. Update Password
         if 'password' in data and data['password']:
             user.set_password(data['password'])
             
         user.save()
 
-        # Update Profil Tambahan (Quotes & Foto Profil)
+        # C. Update Profil Tambahan (Motto & Foto Profil)
         profil, _ = UserProfile.objects.get_or_create(user=user)
         
         if 'quotes' in data:
-            profil.quotes = data['quotes']
+            profil.motto = data['quotes']  # FIX: Menggunakan 'motto' sesuai field model UserProfile
             
         if 'foto' in request.FILES:
             profil.foto_profil = request.FILES['foto']
             
         profil.save()
 
+        # D. Sinkronisasi Otomatis ke Profil Guru (Jika Terhubung)
+        if hasattr(user, 'guru_profile') and user.guru_profile:
+            guru = user.guru_profile
+            if 'quotes' in data:
+                guru.motto = data['quotes']
+            if 'foto' in request.FILES:
+                guru.foto = request.FILES['foto']
+            guru.save()
+
         serializer = UserMeSerializer(user, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 
 # ==========================================
