@@ -425,6 +425,19 @@ class PengumumanSerializer(serializers.ModelSerializer):
         model = Pengumuman
         fields = '__all__'
 
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        request = self.context.get('request')
+        if instance.lampiran and hasattr(instance.lampiran, 'url'):
+            lampiran_url = instance.lampiran.url
+            if request is not None:
+                representation['lampiran'] = request.build_absolute_uri(lampiran_url)
+            else:
+                representation['lampiran'] = lampiran_url
+        else:
+            representation['lampiran'] = None
+        return representation
+
 
 class ProfilSekolahSerializer(serializers.ModelSerializer):
     class Meta:
