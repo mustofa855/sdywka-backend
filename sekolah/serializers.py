@@ -437,6 +437,19 @@ class HeroBannerSerializer(serializers.ModelSerializer):
         model = HeroBanner
         fields = '__all__'
 
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        request = self.context.get('request')
+        if instance.gambar and hasattr(instance.gambar, 'url'):
+            gambar_url = instance.gambar.url
+            if request is not None:
+                representation['gambar'] = request.build_absolute_uri(gambar_url)
+            else:
+                representation['gambar'] = gambar_url
+        else:
+            representation['gambar'] = None
+        return representation
+
 
 # FIX PERBAIKAN: FotoAlbumSerializer mendukung Upload Gambar & Memberikan Absolute URI
 class FotoAlbumSerializer(serializers.ModelSerializer):
