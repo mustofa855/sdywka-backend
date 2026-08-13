@@ -1,6 +1,7 @@
+import os
 import re
 import openpyxl
-from django.http import HttpResponse
+from django.http import FileResponse, HttpResponse
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import time, timedelta
@@ -8,7 +9,7 @@ from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from rest_framework.decorators import api_view, parser_classes, permission_classes
-from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
+from rest_framework.permissions import Http404, IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework import status
@@ -1133,3 +1134,57 @@ def user_note_delete(request, pk):
         return Response({"message": "Anda tidak memiliki izin untuk menghapus status ini."}, status=status.HTTP_403_FORBIDDEN)
     note.delete()
     return Response({"message": "Status berhasil dihapus."}, status=status.HTTP_204_NO_CONTENT)
+
+from django.http import FileResponse
+import os
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated]) # Endpoint aman, Vue sekarang sudah sanggup mengirim JWT di fetch blob
+def download_pengumuman_lampiran(request, pk):
+    pengumuman = get_object_or_404(Pengumuman, pk=pk)
+    
+    if not pengumuman.lampiran:
+        return Response({'message': 'Pengumuman ini tidak memiliki file lampiran.'}, status=status.HTTP_404_NOT_FOUND)
+        
+    file_path = pengumuman.lampiran.path
+    if os.path.exists(file_path):
+        response = FileResponse(open(file_path, 'rb'))
+        filename = os.path.basename(file_path)
+        # Menggunakan format "attachment" agar browser memicu proses download langsung
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+        
+    return Response({'message': 'File fisik tidak ditemukan di server.'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def preview_pengumuman_lampiran(request, pk):
+    """
+    Endpoint khusus untuk pratinjau dokumen di modal (Content-Disposition: inline).
+    """
+    pengumuman = get_object_or_404(Pengumuman, pk=pk)
+    
+    if not pengumuman.lampiran:
+        return Response({'message': 'Pengumuman ini tidak memiliki file lampiran.'}, status=status.HTTP_404_NOT_FOUND)
+        
+    file_path = pengumuman.lampiran.path
+    if os.path.exists(file_path):
+        ext = os.path.splitext(file_path)[1].lower()
+        
+        # Tentukan content-type berdasarkan ekstensi file
+        content_type = 'application/pdf'
+        if ext in ['.jpg', '.jpeg']:
+            content_type = 'image/jpeg'
+        elif ext == '.png':
+            content_type = 'image/png'
+        elif ext == '.webp':
+            content_type = 'image/webp'
+            
+        response = FileResponse(open(file_path, 'rb'), content_type=content_type)
+        filename = os.path.basename(file_path)
+        
+        # Menggunakan "inline" agar browser memuat dokumen di dalam modal iframe / img
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
+        
+    return Response({'message': 'File fisik tidak ditemukan di server.'}, status=status.HTTP_404_NOT_FOUND)
