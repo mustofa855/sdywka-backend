@@ -91,6 +91,10 @@ urlpatterns = [
     path('user-api/notes/', views.user_note_list_create, name='user_note_list_create'),
     path('user-api/notes/<uuid:pk>/like/', views.user_note_like_toggle, name='user_note_like_toggle'),
     path('user-api/notes/<uuid:pk>/', views.user_note_delete, name='user_note_delete'),
+
+    # API Download Lampiran Pengumuman
+    path('pengumuman/<str:pk>/download/', views.download_pengumuman_lampiran, name='download_pengumuman_lampiran'),
+    path('pengumuman/<str:pk>/preview/', views.preview_pengumuman_lampiran, name='preview_pengumuman_lampiran'),
 ]
 
 if settings.DEBUG:
