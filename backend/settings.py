@@ -159,3 +159,10 @@ CORS_ALLOWED_ORIGINS = [origin.strip() for origin in os.environ.get(
 ).split(',') if origin.strip()]
 
 CORS_ALLOW_CREDENTIALS = True
+
+# PERBAIKAN: Mengizinkan frontend membaca header unduhan file/Excel
+CORS_EXPOSE_HEADERS = [
+    'Content-Disposition',
+    'Content-Type',
+    'Content-Length'
+]
