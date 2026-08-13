@@ -431,7 +431,16 @@ class PengumumanSerializer(serializers.ModelSerializer):
         if instance.lampiran and hasattr(instance.lampiran, 'url'):
             lampiran_url = instance.lampiran.url
             if request is not None:
-                representation['lampiran'] = request.build_absolute_uri(lampiran_url)
+                full_url = request.build_absolute_uri(lampiran_url)
+                # Normalisasi pembentukan URL yang valid
+                full_url = full_url.replace('http//', 'http://').replace('https//', 'https://')
+                
+                if full_url.count('http://') > 1 or full_url.count('https://') > 1:
+                    last_http = max(full_url.rfind('http://'), full_url.rfind('https://'))
+                    if last_http != -1:
+                        full_url = full_url[last_http:]
+                
+                representation['lampiran'] = full_url
             else:
                 representation['lampiran'] = lampiran_url
         else:
