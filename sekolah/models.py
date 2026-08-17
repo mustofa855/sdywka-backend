@@ -1,3 +1,4 @@
+import mimetypes
 import uuid
 import os
 import random
@@ -7,21 +8,38 @@ from django.core.exceptions import ValidationError
 
 
 def validate_image_extension(value):
+    # 1. Cek Ukuran (Batas 5 MB)
+    if value.size > 5 * 1024 * 1024:  
+        raise ValidationError('Ukuran gambar tidak boleh lebih dari 5 MB!')
+
+    # 2. Cek Ekstensi Nama File
     ext = os.path.splitext(value.name)[1].lower()
     valid_extensions = ['.jpg', '.jpeg', '.png', '.webp']
     if ext not in valid_extensions:
         raise ValidationError('Format gambar tidak didukung! Gunakan format: .jpg, .jpeg, .png, atau .webp')
-    if value.size > 5 * 1024 * 1024:  # Batas 5 MB
-        raise ValidationError('Ukuran gambar tidak boleh lebih dari 5 MB!')
+
+    # 3. PERBAIKAN: Cek MIME Type dasar untuk memastikan file tidak dikamuflase
+    mime_type, _ = mimetypes.guess_type(value.name)
+    if not mime_type or not mime_type.startswith('image/'):
+        raise ValidationError('File yang diunggah terdeteksi bukan sebagai gambar yang valid (Kemungkinan file dikamuflase).')
 
 
 def validate_pdf_extension(value):
+    # 1. Cek Ukuran (Batas 10 MB)
+    if value.size > 10 * 1024 * 1024:  
+        raise ValidationError('Ukuran lampiran tidak boleh lebih dari 10 MB!')
+
+    # 2. Cek Ekstensi
     ext = os.path.splitext(value.name)[1].lower()
     valid_extensions = ['.pdf', '.jpg', '.jpeg', '.png', '.webp']
     if ext not in valid_extensions:
         raise ValidationError('Lampiran harus berupa file PDF atau Gambar!')
-    if value.size > 10 * 1024 * 1024:  # Batas 10 MB
-        raise ValidationError('Ukuran lampiran tidak boleh lebih dari 10 MB!')
+
+    # 3. PERBAIKAN: Cek MIME Type dasar
+    mime_type, _ = mimetypes.guess_type(value.name)
+    valid_mimes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+    if not mime_type or mime_type not in valid_mimes:
+        raise ValidationError('Tipe konten file tidak sesuai dengan ekstensi yang diizinkan.')
 
 
 def ubah_nama_foto_sdm(instance, filename):
